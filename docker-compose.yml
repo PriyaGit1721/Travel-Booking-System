@@ -1,0 +1,30 @@
+version: "3.6"
+
+services:
+  app:
+    image: priya2117/travel-app:v1
+    container_name: travel-app-cont
+    ports:
+      - "4444:4000"         
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017/travelEas
+    depends_on:
+      - mongodb
+    networks:
+      - travel-network
+
+  mongodb:
+    image: mongo:7.0
+    container_name: travel-mongo
+    restart: always
+    volumes:
+      - travel-data:/data/db   
+    networks:
+      - travel-network
+
+volumes:
+  travel-data:               
+
+networks:
+  travel-network:
+    driver: bridge
