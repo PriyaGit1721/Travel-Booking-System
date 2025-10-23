@@ -42,17 +42,18 @@ pipeline {
         stage('SonarQube Code Analysis') {
             steps {
                 echo '🔍 Running SonarQube scan...'
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "${AWS_CREDENTIALS}"
-                ]]) {
-                    sh """
-                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URL}
-                        docker tag ${IMAGE_NAME}:latest ${ECR_URL}:latest
-                        docker push ${ECR_URL}:latest
-                    """
+                script {
+                    def scannerHome = tool 'sonarscanner'
+                    withSonarQubeEnv("${SONARQUBE}") {
+                        sh """
+                            ${scannerHome}/bin/sonar-scanner \
+                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                            -Dsonar.sources=. \
+                            -Dsonar.host.url=$SONAR_HOST_URL \
+                            -Dsonar.login=$SONAR_AUTH_TOKEN
+                        """
+                    }
                 }
-
             }
         }
 
