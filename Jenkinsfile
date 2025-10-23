@@ -7,20 +7,16 @@ pipeline {
     }
 
     environment {
-        // SonarQube configuration name in Jenkins
+        // SonarQube configuration and credentials
         SONARQUBE = 'sonar-server'
-        // AWS credentials ID in Jenkins
         AWS_CREDENTIALS = 'aws-creds'
-        // DockerHub credentials ID in Jenkins
         DOCKER_CREDENTIALS = 'docker-creds'
-        // ECR repository name (same as Docker image name)
+
+        // App and repo details
         IMAGE_NAME = 'travel-system'
-        // AWS region
         AWS_REGION = 'us-east-1'
-        // GitHub repo details
         GIT_REPO = 'https://github.com/PriyaGit1721/Travel-Booking-System.git'
         GIT_BRANCH = 'master'
-        // SonarQube project key
         SONAR_PROJECT_KEY = 'priya-project'
     }
 
@@ -42,9 +38,11 @@ pipeline {
         stage('SonarQube Code Analysis') {
             steps {
                 script {
+                    echo 'Running SonarQube scan...'
+                    def scannerHome = tool 'sonarscanner'
                     withSonarQubeEnv("${SONARQUBE}") {
                         sh """
-                            sonar-scanner \
+                            ${scannerHome}/bin/sonar-scanner \
                             -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                             -Dsonar.sources=. \
                             -Dsonar.host.url=$SONAR_HOST_URL \
