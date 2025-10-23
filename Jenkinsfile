@@ -21,6 +21,9 @@ pipeline {
         GIT_REPO = 'https://github.com/PriyaGit1721/Travel-Booking-System.git'
         GIT_BRANCH = 'master'
         SONAR_PROJECT_KEY = 'priya-project'
+
+        // Sonar Scanner Path
+        PATH = "/opt/sonar-scanner/bin:${env.PATH}"
     }
 
     stages {
@@ -115,4 +118,5 @@ pipeline {
         }
     }
 }
+
 
