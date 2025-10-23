@@ -22,8 +22,9 @@ pipeline {
         GIT_BRANCH = 'master'
         SONAR_PROJECT_KEY = 'priya-project'
 
-        // Sonar Scanner Path
-        PATH = "/opt/sonar-scanner/bin:${env.PATH}"
+        // Paths
+        SONAR_SCANNER_PATH = '/opt/sonar-scanner/bin/sonar-scanner'
+        DOCKER_COMPOSE_PATH = '/usr/bin/docker-compose'
     }
 
     stages {
@@ -47,7 +48,7 @@ pipeline {
                 echo '🔍 Running SonarQube scan...'
                 withSonarQubeEnv("${SONARQUBE}") {
                     sh """
-                        sonar-scanner \
+                        ${SONAR_SCANNER_PATH} \
                         -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                         -Dsonar.sources=. \
                         -Dsonar.host.url=$SONAR_HOST_URL \
@@ -61,9 +62,9 @@ pipeline {
             steps {
                 echo '🐳 Building and running app with Docker Compose...'
                 sh """
-                    docker-compose down
-                    docker-compose build
-                    docker-compose up -d
+                    ${DOCKER_COMPOSE_PATH} down
+                    ${DOCKER_COMPOSE_PATH} build
+                    ${DOCKER_COMPOSE_PATH} up -d
                 """
             }
         }
@@ -118,5 +119,6 @@ pipeline {
         }
     }
 }
+
 
 
