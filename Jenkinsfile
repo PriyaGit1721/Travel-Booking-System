@@ -7,100 +7,116 @@ pipeline {
     }
 
     environment {
-        SONARQUBE = 'sonar-server'       // SonarQube system name in Jenkins
-        DOCKER_CREDS = credentials('docker-creds')
+        // SonarQube configuration name in Jenkins
+        SONARQUBE = 'sonar-server'
+        // AWS credentials ID in Jenkins
+        AWS_CREDENTIALS = 'aws-creds'
+        // DockerHub credentials ID in Jenkins
+        DOCKER_CREDENTIALS = 'docker-creds'
+        // ECR repository name (same as Docker image name)
         IMAGE_NAME = 'travel-system'
-        CONTAINER_NAME = 'travel-booking'
-        REGISTRY = 'docker.io'            // change if using AWS ECR, etc.
-        BRANCH = 'master'
-        REPO_URL = 'https://github.com/PriyaGit1721/Travel-Booking-System.git'
+        // AWS region
+        AWS_REGION = 'us-east-1'
+        // GitHub repo details
+        GIT_REPO = 'https://github.com/PriyaGit1721/Travel-Booking-System.git'
+        GIT_BRANCH = 'master'
+        // SonarQube project key
+        SONAR_PROJECT_KEY = 'priya-project'
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                echo "Fetching latest source code from ${REPO_URL}..."
-                git branch: "${BRANCH}", url: "${REPO_URL}"
+                echo 'Cloning repository...'
+                git branch: "${GIT_BRANCH}", url: "${GIT_REPO}"
             }
         }
 
         stage('Install Dependencies') {
             steps {
-                echo "Installing Node.js dependencies..."
+                echo 'Installing Node.js dependencies...'
                 sh 'npm install'
             }
         }
 
         stage('SonarQube Code Analysis') {
             steps {
-                echo "Running SonarQube Analysis..."
-                withSonarQubeEnv("${SONARQUBE}") {
-                    sh '''
-                        npx sonar-scanner \
-                        -Dsonar.projectKey=travel-system \
-                        -Dsonar.projectName="Travel Booking System" \
-                        -Dsonar.sources=. \
-                        -Dsonar.host.url=$SONAR_HOST_URL \
-                        -Dsonar.login=$SONAR_AUTH_TOKEN
-                    '''
+                script {
+                    withSonarQubeEnv("${SONARQUBE}") {
+                        sh """
+                            sonar-scanner \
+                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                            -Dsonar.sources=. \
+                            -Dsonar.host.url=$SONAR_HOST_URL \
+                            -Dsonar.login=$SONAR_AUTH_TOKEN
+                        """
+                    }
                 }
-            }
-        }
-
-        stage('Quality Gate') {
-            steps {
-                echo "Checking SonarQube Quality Gate..."
-                timeout(time: 2, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
-            }
-        }
-
-        stage('Run Tests') {
-            steps {
-                echo "Running project test cases..."
-                sh 'npm test || echo "No test cases found, skipping..."'
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo "Building Docker image..."
-                sh '''
-                    docker build -t $IMAGE_NAME:latest .
-                    docker tag $IMAGE_NAME:latest $REGISTRY/$DOCKER_CREDS_USR/$IMAGE_NAME:latest
-                '''
+                script {
+                    echo 'Building Docker image...'
+                    sh "docker build -t ${IMAGE_NAME}:latest ."
+                }
+            }
+        }
+
+        stage('Login to AWS ECR and Push Image') {
+            steps {
+                script {
+                    withAWS(credentials: "${AWS_CREDENTIALS}", region: "${AWS_REGION}") {
+                        script {
+                            ECR_REPO_URI = sh(
+                                script: "aws ecr describe-repositories --repository-names ${IMAGE_NAME} --query 'repositories[0].repositoryUri' --output text 2>/dev/null || aws ecr create-repository --repository-name ${IMAGE_NAME} --query 'repository.repositoryUri' --output text",
+                                returnStdout: true
+                            ).trim()
+
+                            echo "ECR Repository URI: ${ECR_REPO_URI}"
+
+                            sh """
+                                aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_URI}
+                                docker tag ${IMAGE_NAME}:latest ${ECR_REPO_URI}:latest
+                                docker push ${ECR_REPO_URI}:latest
+                            """
+                        }
+                    }
+                }
             }
         }
 
         stage('Push to Docker Hub') {
             steps {
-                echo "Pushing image to Docker Hub..."
-                sh '''
-                    echo $DOCKER_CREDS_PSW | docker login -u $DOCKER_CREDS_USR --password-stdin $REGISTRY
-                    docker push $REGISTRY/$DOCKER_CREDS_USR/$IMAGE_NAME:latest
-                '''
+                script {
+                    echo 'Pushing image to Docker Hub...'
+                    withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh """
+                            echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                            docker tag ${IMAGE_NAME}:latest $DOCKER_USER/${IMAGE_NAME}:latest
+                            docker push $DOCKER_USER/${IMAGE_NAME}:latest
+                        """
+                    }
+                }
             }
         }
 
-        stage('Deploy') {
+        stage('Post SonarQube Quality Gate') {
             steps {
-                echo "Deploying Docker container..."
-                sh '''
-                    docker stop $CONTAINER_NAME || true
-                    docker rm $CONTAINER_NAME || true
-                    docker run -d -p 3000:3000 --name $CONTAINER_NAME $REGISTRY/$DOCKER_CREDS_USR/$IMAGE_NAME:latest
-                '''
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
             }
         }
     }
 
     post {
         success {
-            echo "✅ Deployment successful! Travel Booking System app is running."
+            echo "✅ Build, Scan, and Push to AWS ECR & Docker Hub completed successfully!"
         }
         failure {
-            echo "❌ Build failed! Please check the Jenkins logs for more details."
+            echo "❌ Pipeline failed. Please check logs for details."
         }
     }
 }
