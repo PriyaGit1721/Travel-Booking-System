@@ -13,7 +13,7 @@ pipeline {
         DOCKER_CREDENTIALS = 'docker-creds'
 
         // Application configuration
-        IMAGE_NAME = 'travel-system'
+        IMAGE_NAME = 'travel-booking-system'
         AWS_REGION = 'us-east-1'
         ECR_URL = '735263431599.dkr.ecr.us-east-1.amazonaws.com/travel-repo-ecr'
 
@@ -42,49 +42,42 @@ pipeline {
         stage('SonarQube Code Analysis') {
             steps {
                 echo '🔍 Running SonarQube scan...'
-                script {
-                    def scannerHome = tool 'sonarscanner'
-                    withSonarQubeEnv("${SONARQUBE}") {
-                        sh """
-                            ${scannerHome}/bin/sonar-scanner \
-                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                            -Dsonar.sources=. \
-                            -Dsonar.host.url=$SONAR_HOST_URL \
-                            -Dsonar.login=$SONAR_AUTH_TOKEN
-                        """
-                    }
+                withSonarQubeEnv("${SONARQUBE}") {
+                    sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=."
                 }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build & Run with Docker Compose') {
             steps {
-                echo '🐳 Building Docker image...'
-                sh "docker build -t ${IMAGE_NAME}:latest ."
+                echo '🐳 Building and running containers with Docker Compose...'
+                sh 'docker-compose up -d --build'
             }
         }
 
-        stage('Push to AWS ECR') {
+        stage('Push App Image to AWS ECR') {
             steps {
-                script {
-                    echo '🚀 Logging into AWS ECR and pushing image...'
-                    withAWS(credentials: "${AWS_CREDENTIALS}", region: "${AWS_REGION}") {
-                        sh """
-                            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URL}
-                            docker tag ${IMAGE_NAME}:latest ${ECR_URL}:latest
-                            docker push ${ECR_URL}:latest
-                        """
-                    }
+                echo '🚀 Tagging and pushing Node.js image to AWS ECR...'
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "${AWS_CREDENTIALS}"
+                ]]) {
+                    sh """
+                        docker-compose build app
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URL}
+                        docker tag ${IMAGE_NAME}:latest ${ECR_URL}:latest
+                        docker push ${ECR_URL}:latest
+                    """
                 }
             }
         }
 
-        stage('Push to Docker Hub') {
+        stage('Push App Image to Docker Hub') {
             steps {
-                echo '📤 Pushing image to Docker Hub...'
+                echo '📤 Pushing Node.js image to Docker Hub...'
                 withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh """
-                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        docker login -u $DOCKER_USER -p $DOCKER_PASS
                         docker tag ${IMAGE_NAME}:latest $DOCKER_USER/${IMAGE_NAME}:latest
                         docker push $DOCKER_USER/${IMAGE_NAME}:latest
                     """
@@ -104,7 +97,7 @@ pipeline {
 
     post {
         success {
-            echo "✅ SUCCESS: Build, scan, and push to AWS ECR & Docker Hub completed successfully!"
+            echo "✅ SUCCESS: Build, scan, run with Docker Compose, and push to AWS ECR & Docker Hub completed!"
         }
         failure {
             echo "❌ FAILURE: Please check pipeline logs for details."
