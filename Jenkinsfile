@@ -4,7 +4,6 @@ pipeline {
     tools {
         jdk 'jdk21'
         nodejs 'nodejs'
-        sonarScanner 'sonarscanner'
     }
 
     environment {
@@ -14,7 +13,7 @@ pipeline {
         DOCKER_CREDENTIALS = 'docker-creds'
 
         // Application configuration
-        IMAGE_NAME = 'travel-system'
+        IMAGE_NAME = 'travel-booking-system'
         AWS_REGION = 'us-east-1'
         ECR_URL = '735263431599.dkr.ecr.us-east-1.amazonaws.com/travel-repo-ecr'
 
@@ -43,31 +42,26 @@ pipeline {
         stage('SonarQube Code Analysis') {
             steps {
                 echo '🔍 Running SonarQube scan...'
-                script {
-                    def scannerHome = tool 'sonarscanner'
-                    withSonarQubeEnv("${SONARQUBE}") {
-                        sh """
-                            ${scannerHome}/bin/sonar-scanner \
-                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                            -Dsonar.sources=. \
-                            -Dsonar.host.url=$SONAR_HOST_URL \
-                            -Dsonar.login=$SONAR_AUTH_TOKEN
-                        """
-                    }
+                withSonarQubeEnv("${SONARQUBE}") {
+                    sh """
+                        sonar-scanner \
+                        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                        -Dsonar.sources=. \
+                        -Dsonar.host.url=$SONAR_HOST_URL \
+                        -Dsonar.login=$SONAR_AUTH_TOKEN
+                    """
                 }
             }
         }
 
         stage('Build & Run with Docker Compose') {
             steps {
-                echo '🐳 Building and running containers via Docker Compose...'
-                sh '''
-                    # Stop any existing containers
-                    docker-compose down || true
-                    
-                    # Build and run containers in detached mode
-                    docker-compose up --build -d
-                '''
+                echo '🐳 Building and running app with Docker Compose...'
+                sh """
+                    docker-compose down
+                    docker-compose build
+                    docker-compose up -d
+                """
             }
         }
 
@@ -77,10 +71,9 @@ pipeline {
                     echo '🚀 Logging into AWS ECR and pushing image...'
                     withAWS(credentials: "${AWS_CREDENTIALS}", region: "${AWS_REGION}") {
                         sh """
-                            # Tag and push the app image from Docker Compose
-                            APP_IMAGE=\$(docker-compose images -q app)
-                            docker tag \$APP_IMAGE ${ECR_URL}:latest
+                            docker build -t ${IMAGE_NAME}:latest .
                             aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_URL}
+                            docker tag ${IMAGE_NAME}:latest ${ECR_URL}:latest
                             docker push ${ECR_URL}:latest
                         """
                     }
@@ -92,12 +85,12 @@ pipeline {
             steps {
                 echo '📤 Pushing image to Docker Hub...'
                 withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh '''
-                        APP_IMAGE=$(docker-compose images -q app)
+                    sh """
+                        docker build -t ${IMAGE_NAME}:latest .
                         echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-                        docker tag $APP_IMAGE $DOCKER_USER/${IMAGE_NAME}:latest
+                        docker tag ${IMAGE_NAME}:latest $DOCKER_USER/${IMAGE_NAME}:latest
                         docker push $DOCKER_USER/${IMAGE_NAME}:latest
-                    '''
+                    """
                 }
             }
         }
@@ -110,14 +103,16 @@ pipeline {
                 }
             }
         }
+
     }
 
     post {
         success {
-            echo "✅ SUCCESS: Build, scan, and Docker Compose deployment completed successfully!"
+            echo "✅ SUCCESS: Build, scan, and push completed successfully!"
         }
         failure {
             echo "❌ FAILURE: Please check pipeline logs for details."
         }
     }
 }
+
